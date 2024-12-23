@@ -1,0 +1,100 @@
+import numpy as np
+import matplotlib.pyplot as plt
+
+# Define a simple Transformer-like structure
+
+def simple_attention(inputs):
+    """ Simplified self-attention mechanism """
+    batch_size, seq_len, input_dim = inputs.shape
+    inputs_flat = inputs.reshape(batch_size * seq_len, input_dim)
+    scores = np.dot(inputs_flat, inputs_flat.T)
+    scores = scores / np.sqrt(input_dim)  # Scale scores to prevent exploding values
+    attention_weights = np.exp(scores - np.max(scores, axis=1, keepdims=True))  # Stability improvement
+    attention_weights /= np.sum(attention_weights, axis=1, keepdims=True)
+    attention_output = np.dot(attention_weights, inputs_flat)
+    return attention_output.reshape(batch_size, seq_len, input_dim)
+
+def feed_forward(inputs, hidden_dim):
+    """ Simplified feed-forward network """
+    batch_size, seq_len, input_dim = inputs.shape
+    hidden = np.maximum(0, np.dot(inputs.reshape(batch_size * seq_len, input_dim), np.random.randn(input_dim, hidden_dim)))
+    output = np.dot(hidden, np.random.randn(hidden_dim, input_dim))
+    return output.reshape(batch_size, seq_len, input_dim)
+
+def transformer_block(inputs, hidden_dim):
+    """ A single transformer-like block """
+    attention_output = simple_attention(inputs)
+    norm1 = inputs + attention_output  # Residual connection
+    ff_output = feed_forward(norm1, hidden_dim)
+    norm2 = norm1 + ff_output  # Residual connection
+    return norm2
+
+def generator(inputs, mask, hidden_dim=64, num_layers=2):
+    """ Simplified Generator """
+    x = inputs * mask + np.random.randn(*inputs.shape) * (1 - mask)  # Add noise to missing parts
+    for _ in range(num_layers):
+        x = transformer_block(x, hidden_dim)
+    return x
+
+def discriminator(inputs):
+    """ Simplified Discriminator """
+    flattened = inputs.reshape(inputs.shape[0], -1)  # Flatten input
+    hidden = np.maximum(0, np.dot(flattened, np.random.randn(flattened.shape[1], 128)))
+    logits = np.dot(hidden, np.random.randn(128, 1))
+    output = 1 / (1 + np.exp(-logits))  # Sigmoid activation
+    return output.flatten()
+
+def create_sinusoidal_data(batch_size, seq_len, input_dim):
+    t = np.linspace(0, 4 * np.pi, seq_len)
+    data = np.sin(t)[None, :, None] + 0.1 * np.random.randn(batch_size, seq_len, input_dim)
+    mask = (np.random.rand(batch_size, seq_len, input_dim) > 0.2).astype(float)
+    return data, mask
+
+# Training T-GAIN
+def run_tgain(real_data, mask, hidden_dim=64, num_layers=2, epochs=10):
+    d_losses, g_losses = [], []
+    for epoch in range(epochs):
+        # Generator forward pass
+        generated_data = generator(real_data, mask, hidden_dim, num_layers)
+        imputed_data = real_data * mask + generated_data * (1 - mask)
+
+        # Discriminator forward pass
+        d_real = discriminator(real_data)
+        d_fake = discriminator(imputed_data)
+
+        # Compute losses
+        d_loss_real = -np.mean(np.log(d_real + 1e-8))
+        d_loss_fake = -np.mean(np.log(1 - d_fake + 1e-8))
+        d_loss = d_loss_real + d_loss_fake
+        g_loss = np.mean((real_data - imputed_data) ** 2)
+
+        # Append losses
+        d_losses.append(d_loss)
+        g_losses.append(g_loss)
+
+        print(f"Epoch {epoch+1}, D Loss: {d_loss:.4f}, G Loss: {g_loss:.4f}")
+
+    return d_losses, g_losses
+
+# Generate sinusoidal data
+batch_size = 32
+seq_len = 20
+input_dim = 10
+hidden_dim = 64
+epochs = 10
+
+real_data, mask = create_sinusoidal_data(batch_size, seq_len, input_dim)
+
+# Train T-GAIN
+d_losses, g_losses = run_tgain(real_data, mask, hidden_dim, epochs=epochs)
+
+# Plot the results
+plt.figure(figsize=(10, 5))
+plt.plot(range(1, epochs + 1), d_losses, label='Discriminator Loss', marker='o')
+plt.plot(range(1, epochs + 1), g_losses, label='Generator Loss', marker='s')
+plt.xlabel('Epochs')
+plt.ylabel('Loss')
+plt.title('T-GAIN Training Loss with Sinusoidal Data')
+plt.legend()
+plt.grid()
+plt.show()
