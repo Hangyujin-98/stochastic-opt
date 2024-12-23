@@ -4,15 +4,19 @@ import matplotlib.pyplot as plt
 # Define a simple Transformer-like structure without deep learning frameworks
 def simple_attention(inputs):
     """ Simplified self-attention mechanism """
-    scores = np.dot(inputs, inputs.T)
+    batch_size, seq_len, input_dim = inputs.shape
+    inputs_flat = inputs.reshape(batch_size * seq_len, input_dim)
+    scores = np.dot(inputs_flat, inputs_flat.T)
     attention_weights = np.exp(scores) / np.sum(np.exp(scores), axis=1, keepdims=True)
-    return np.dot(attention_weights, inputs)
+    attention_output = np.dot(attention_weights, inputs_flat)
+    return attention_output.reshape(batch_size, seq_len, input_dim)
 
 def feed_forward(inputs, hidden_dim):
     """ Simplified feed-forward network """
-    hidden = np.maximum(0, np.dot(inputs, np.random.randn(inputs.shape[1], hidden_dim)))
-    output = np.dot(hidden, np.random.randn(hidden_dim, inputs.shape[1]))
-    return output
+    batch_size, seq_len, input_dim = inputs.shape
+    hidden = np.maximum(0, np.dot(inputs.reshape(batch_size * seq_len, input_dim), np.random.randn(input_dim, hidden_dim)))
+    output = np.dot(hidden, np.random.randn(hidden_dim, input_dim))
+    return output.reshape(batch_size, seq_len, input_dim)
 
 def transformer_block(inputs, hidden_dim):
     """ A single transformer-like block """
@@ -59,7 +63,7 @@ for epoch in range(epochs):
     d_fake = discriminator(imputed_data)
 
     # Compute losses
-    d_loss = -np.mean(np.log(d_real) + np.log(1 - d_fake))
+    d_loss = -np.mean(np.log(d_real + 1e-8) + np.log(1 - d_fake + 1e-8))  # Add epsilon to prevent log(0)
     g_loss = np.mean((real_data - imputed_data) ** 2)  # Simplified generator loss
 
     # Update losses
