@@ -1,0 +1,80 @@
+import numpy as np
+import matplotlib.pyplot as plt
+
+# Define a simple Transformer-like structure without deep learning frameworks
+def simple_attention(inputs):
+    """ Simplified self-attention mechanism """
+    scores = np.dot(inputs, inputs.T)
+    attention_weights = np.exp(scores) / np.sum(np.exp(scores), axis=1, keepdims=True)
+    return np.dot(attention_weights, inputs)
+
+def feed_forward(inputs, hidden_dim):
+    """ Simplified feed-forward network """
+    hidden = np.maximum(0, np.dot(inputs, np.random.randn(inputs.shape[1], hidden_dim)))
+    output = np.dot(hidden, np.random.randn(hidden_dim, inputs.shape[1]))
+    return output
+
+def transformer_block(inputs, hidden_dim):
+    """ A single transformer-like block """
+    attention_output = simple_attention(inputs)
+    norm1 = inputs + attention_output  # Residual connection
+    ff_output = feed_forward(norm1, hidden_dim)
+    norm2 = norm1 + ff_output  # Residual connection
+    return norm2
+
+def generator(inputs, mask, hidden_dim=64, num_layers=2):
+    """ Simplified Generator """
+    x = inputs * mask + np.random.randn(*inputs.shape) * (1 - mask)  # Add noise to missing parts
+    for _ in range(num_layers):
+        x = transformer_block(x, hidden_dim)
+    return x
+
+def discriminator(inputs):
+    """ Simplified Discriminator """
+    flattened = inputs.reshape(inputs.shape[0], -1)  # Flatten input
+    hidden = np.maximum(0, np.dot(flattened, np.random.randn(flattened.shape[1], 128)))
+    output = 1 / (1 + np.exp(-np.dot(hidden, np.random.randn(128, 1))))  # Sigmoid activation
+    return output
+
+# Training loop
+input_dim = 10
+seq_len = 20
+batch_size = 32
+epochs = 10
+hidden_dim = 64
+
+# Synthetic data
+real_data = np.random.randn(batch_size, seq_len, input_dim)
+mask = (np.random.rand(batch_size, seq_len, input_dim) > 0.2).astype(float)
+
+d_losses, g_losses = [], []
+
+for epoch in range(epochs):
+    # Generator forward pass
+    generated_data = generator(real_data, mask, hidden_dim)
+    imputed_data = real_data * mask + generated_data * (1 - mask)
+
+    # Discriminator forward pass
+    d_real = discriminator(real_data)
+    d_fake = discriminator(imputed_data)
+
+    # Compute losses
+    d_loss = -np.mean(np.log(d_real) + np.log(1 - d_fake))
+    g_loss = np.mean((real_data - imputed_data) ** 2)  # Simplified generator loss
+
+    # Update losses
+    d_losses.append(d_loss)
+    g_losses.append(g_loss)
+
+    print(f"Epoch {epoch+1}, D Loss: {d_loss:.4f}, G Loss: {g_loss:.4f}")
+
+# Plot the results
+plt.figure(figsize=(10, 5))
+plt.plot(range(1, epochs + 1), d_losses, label='Discriminator Loss', marker='o')
+plt.plot(range(1, epochs + 1), g_losses, label='Generator Loss', marker='s')
+plt.xlabel('Epochs')
+plt.ylabel('Loss')
+plt.title('T-GAIN Training Loss (Simplified)')
+plt.legend()
+plt.grid()
+plt.show()
