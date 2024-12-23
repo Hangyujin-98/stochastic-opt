@@ -1,0 +1,143 @@
+import numpy as np
+import matplotlib.pyplot as plt
+
+# Define a simple Transformer-like structure with extended functionality
+
+def simple_attention(inputs):
+    """ Simplified self-attention mechanism """
+    batch_size, seq_len, input_dim = inputs.shape
+    inputs_flat = inputs.reshape(batch_size * seq_len, input_dim)
+    scores = np.dot(inputs_flat, inputs_flat.T)
+    scores = scores / np.sqrt(input_dim)  # Scale scores to prevent exploding values
+    attention_weights = np.exp(scores - np.max(scores, axis=1, keepdims=True))  # Stability improvement
+    attention_weights /= np.sum(attention_weights, axis=1, keepdims=True)
+    attention_output = np.dot(attention_weights, inputs_flat)
+    return attention_output.reshape(batch_size, seq_len, input_dim)
+
+def feed_forward(inputs, hidden_dim):
+    """ Simplified feed-forward network """
+    batch_size, seq_len, input_dim = inputs.shape
+    hidden = np.maximum(0, np.dot(inputs.reshape(batch_size * seq_len, input_dim), np.random.randn(input_dim, hidden_dim)))
+    output = np.dot(hidden, np.random.randn(hidden_dim, input_dim))
+    return output.reshape(batch_size, seq_len, input_dim)
+
+def transformer_block(inputs, hidden_dim):
+    """ A single transformer-like block """
+    attention_output = simple_attention(inputs)
+    norm1 = inputs + attention_output  # Residual connection
+    ff_output = feed_forward(norm1, hidden_dim)
+    norm2 = norm1 + ff_output  # Residual connection
+    return norm2
+
+def generator(inputs, mask, hidden_dim=64, num_layers=2):
+    """ Simplified Generator """
+    x = inputs * mask + np.random.randn(*inputs.shape) * (1 - mask)  # Add noise to missing parts
+    for _ in range(num_layers):
+        x = transformer_block(x, hidden_dim)
+    return x
+
+def discriminator(inputs):
+    """ Simplified Discriminator """
+    flattened = inputs.reshape(inputs.shape[0], -1)  # Flatten input
+    hidden = np.maximum(0, np.dot(flattened, np.random.randn(flattened.shape[1], 128)))
+    logits = np.dot(hidden, np.random.randn(128, 1))
+    output = 1 / (1 + np.exp(-logits))  # Sigmoid activation
+    return output.flatten()
+
+def selective_generator(inputs, mask, num_generators=3, hidden_dim=64, num_layers=2):
+    """ Multiple generators with selective output """
+    generated_outputs = []
+    for _ in range(num_generators):
+        x = inputs * mask + np.random.randn(*inputs.shape) * (1 - mask)
+        for _ in range(num_layers):
+            x = transformer_block(x, hidden_dim)
+        generated_outputs.append(x)
+    # Selective generation (e.g., average output for simplicity)
+    return np.mean(generated_outputs, axis=0)
+
+def create_sinusoidal_data(batch_size, seq_len, input_dim):
+    t = np.linspace(0, 4 * np.pi, seq_len)
+    data = np.sin(t)[None, :, None] + 0.1 * np.random.randn(batch_size, seq_len, input_dim)
+    mask = (np.random.rand(batch_size, seq_len, input_dim) > 0.2).astype(float)
+    return data, mask
+
+def normalize_data(data):
+    min_val = np.nanmin(data, axis=0, keepdims=True)
+    max_val = np.nanmax(data, axis=0, keepdims=True)
+    return (data - min_val) / (max_val - min_val + 1e-6), (min_val, max_val)
+
+def denormalize_data(data, norm_params):
+    min_val, max_val = norm_params
+    return data * (max_val - min_val + 1e-6) + min_val
+
+def run_tgain(real_data, mask, hidden_dim=64, num_layers=2, epochs=10):
+    d_losses, g_losses = [], []
+    for epoch in range(epochs):
+        generated_data = generator(real_data, mask, hidden_dim, num_layers)
+        imputed_data = real_data * mask + generated_data * (1 - mask)
+
+        d_real = discriminator(real_data)
+        d_fake = discriminator(imputed_data)
+
+        d_loss_real = -np.mean(np.log(d_real + 1e-8))
+        d_loss_fake = -np.mean(np.log(1 - d_fake + 1e-8))
+        d_loss = d_loss_real + d_loss_fake
+        g_loss = np.mean((real_data - imputed_data) ** 2)
+
+        d_losses.append(d_loss)
+        g_losses.append(g_loss)
+
+    return d_losses, g_losses
+
+def run_sgtgain(real_data, mask, hidden_dim=64, num_generators=3, num_layers=2, epochs=10):
+    d_losses, g_losses = [], []
+    for epoch in range(epochs):
+        generated_data = selective_generator(real_data, mask, num_generators, hidden_dim, num_layers)
+        imputed_data = real_data * mask + generated_data * (1 - mask)
+
+        d_real = discriminator(real_data)
+        d_fake = discriminator(imputed_data)
+
+        d_loss_real = -np.mean(np.log(d_real + 1e-8))
+        d_loss_fake = -np.mean(np.log(1 - d_fake + 1e-8))
+        d_loss = d_loss_real + d_loss_fake
+        g_loss = np.mean((real_data - imputed_data) ** 2)
+
+        d_losses.append(d_loss)
+        g_losses.append(g_loss)
+
+    return d_losses, g_losses
+
+# Training setup
+input_dim = 10
+seq_len = 20
+batch_size = 32
+epochs = 10
+hidden_dim = 64
+num_generators = 3
+
+# Generate sinusoidal data
+real_data, mask = create_sinusoidal_data(batch_size, seq_len, input_dim)
+
+# Normalize data
+normalized_data, norm_params = normalize_data(real_data)
+
+# Run T-GAIN and SGT-GAIN
+tgain_d_losses, tgain_g_losses = run_tgain(normalized_data, mask, hidden_dim, epochs=epochs)
+sgtgain_d_losses, sgtgain_g_losses = run_sgtgain(normalized_data, mask, hidden_dim, num_generators, epochs=epochs)
+
+# Denormalize results for evaluation
+real_data_restored = denormalize_data(normalized_data, norm_params)
+
+# Plot T-GAIN vs SGT-GAIN
+plt.figure(figsize=(12, 6))
+plt.plot(range(1, epochs + 1), tgain_d_losses, label='T-GAIN Discriminator Loss', marker='o')
+plt.plot(range(1, epochs + 1), tgain_g_losses, label='T-GAIN Generator Loss', marker='s')
+plt.plot(range(1, epochs + 1), sgtgain_d_losses, label='SGT-GAIN Discriminator Loss', marker='o', linestyle='--')
+plt.plot(range(1, epochs + 1), sgtgain_g_losses, label='SGT-GAIN Generator Loss', marker='s', linestyle='--')
+plt.xlabel('Epochs')
+plt.ylabel('Loss')
+plt.title('T-GAIN vs SGT-GAIN Training Loss Comparison')
+plt.legend()
+plt.grid()
+plt.show()
